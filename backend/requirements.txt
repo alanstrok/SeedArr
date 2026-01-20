@@ -1,33 +1,33 @@
 # FastAPI and server
-fastapi==0.109.2
-uvicorn[standard]==0.27.1
-python-multipart==0.0.9
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
 
 # Database
-sqlalchemy==2.0.25
-aiosqlite==0.19.0
-alembic==1.13.1
+sqlalchemy>=2.0.25
+aiosqlite>=0.19.0
+alembic>=1.13.0
 
 # Validation and serialization
-pydantic==2.6.1
-pydantic-settings==2.1.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
 
 # HTTP client
-httpx==0.26.0
-aiohttp==3.9.3
+httpx>=0.26.0
+aiohttp>=3.9.0
 
 # qBittorrent API
-qbittorrent-api==2024.1.59
+qbittorrent-api>=2024.1.59
 
 # Scheduling
-apscheduler==3.10.4
+apscheduler>=3.10.4
 
 # Security
-cryptography==42.0.2
-python-jose[cryptography]==3.3.0
+cryptography>=42.0.0
+python-jose[cryptography]>=3.3.0
 
 # Logging
-loguru==0.7.2
+loguru>=0.7.2
 
 # Utilities
-python-dotenv==1.0.1
+python-dotenv>=1.0.0
