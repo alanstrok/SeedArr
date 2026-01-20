@@ -16,6 +16,10 @@ from app.services.scheduler import scheduler
 from app.models.settings import DEFAULT_SETTINGS
 from app.models import Settings
 
+# Determine log directory
+LOG_DIR = Path("/app/data") if Path("/app/data").exists() else Path("data")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 # Configure loguru
 logger.remove()
 logger.add(
@@ -24,7 +28,7 @@ logger.add(
     level="DEBUG" if settings.debug else "INFO",
 )
 logger.add(
-    "config/seedarr.log",
+    LOG_DIR / "seedarr.log",
     rotation="10 MB",
     retention="7 days",
     level="DEBUG" if settings.debug else "INFO",

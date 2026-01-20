@@ -29,19 +29,19 @@ COPY backend/app/ ./app/
 # Copy built frontend to static directory
 COPY --from=frontend-build /app/frontend/dist ./static/
 
-# Create config directory
-RUN mkdir -p /config
+# Create data directory
+RUN mkdir -p /app/data
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV DATABASE_URL=sqlite+aiosqlite:///config/seedarr.db
+ENV DATABASE_URL=sqlite+aiosqlite:////app/data/seedarr.db
 
 # Expose port
-EXPOSE 8585
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8585/api/health || exit 1
+    CMD curl -f http://localhost:8080/api/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8585"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
