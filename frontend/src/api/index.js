@@ -37,6 +37,10 @@ export const trackersApi = {
   delete: (id) => api.delete(`/api/trackers/${id}`),
   discover: () => api.post('/api/trackers/discover'),
   stats: (id) => api.get(`/api/trackers/${id}/stats`),
+  updateStats: (id) => api.post(`/api/trackers/${id}/update-stats`),
+  toggle: (id) => api.post(`/api/trackers/${id}/toggle`),
+  togglePermaseed: (id) => api.post(`/api/trackers/${id}/permaseed`),
+  zoneSummary: () => api.get('/api/trackers/zone-summary'),
 }
 
 export const rulesApi = {

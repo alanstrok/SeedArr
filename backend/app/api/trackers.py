@@ -1,8 +1,8 @@
-"""Trackers API routes."""
+"""Trackers API routes with zone-based seeding rules."""
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from app.database import get_db
 from app.models import Tracker, Torrent
@@ -12,6 +12,7 @@ from app.schemas.tracker import (
     TrackerResponse,
     TrackerStatsResponse,
     DiscoveredTracker,
+    TrackerZoneSummary,
 )
 from app.services.tracker_discovery import TrackerDiscoveryService
 
@@ -20,7 +21,7 @@ router = APIRouter()
 
 @router.get("", response_model=List[TrackerResponse])
 async def list_trackers(db: AsyncSession = Depends(get_db)):
-    """List all trackers."""
+    """List all trackers with their zone configurations."""
     result = await db.execute(select(Tracker).order_by(Tracker.name))
     trackers = result.scalars().all()
     return trackers
@@ -28,17 +29,59 @@ async def list_trackers(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=TrackerResponse, status_code=status.HTTP_201_CREATED)
 async def create_tracker(data: TrackerCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new tracker."""
+    """Create a new tracker with zone-based seeding rules."""
     tracker = Tracker(
         name=data.name,
         patterns=data.patterns,
         prowlarr_indexer_id=data.prowlarr_indexer_id,
-        default_rule_id=data.default_rule_id,
+        prowlarr_indexer_name=data.prowlarr_indexer_name,
+        enabled=data.enabled,
+        # Zone 1: Obligations
+        min_seed_time_hours=data.min_seed_time_hours,
+        min_ratio=data.min_ratio,
+        min_operator=data.min_operator,
+        # Zone 2: Preferences
+        keep_if_seeders_below=data.keep_if_seeders_below,
+        keep_if_activity_within_hours=data.keep_if_activity_within_hours,
+        permaseed=data.permaseed,
+        # Zone 3: Deletion
+        deletion_priority=data.deletion_priority,
+        max_seed_time_hours=data.max_seed_time_hours,
     )
     db.add(tracker)
     await db.commit()
     await db.refresh(tracker)
     return tracker
+
+
+@router.get("/zone-summary", response_model=TrackerZoneSummary)
+async def get_zone_summary(db: AsyncSession = Depends(get_db)):
+    """Get summary of zone distribution across all trackers."""
+    result = await db.execute(select(Tracker).order_by(Tracker.name))
+    trackers = result.scalars().all()
+
+    total_zone1 = sum(t.stats_zone1_count for t in trackers)
+    total_zone2 = sum(t.stats_zone2_count for t in trackers)
+    total_zone3 = sum(t.stats_zone3_count for t in trackers)
+
+    tracker_list = [
+        {
+            "id": t.id,
+            "name": t.name,
+            "zone1": t.stats_zone1_count,
+            "zone2": t.stats_zone2_count,
+            "zone3": t.stats_zone3_count,
+            "total": t.stats_torrent_count,
+        }
+        for t in trackers
+    ]
+
+    return TrackerZoneSummary(
+        total_zone1=total_zone1,
+        total_zone2=total_zone2,
+        total_zone3=total_zone3,
+        trackers=tracker_list,
+    )
 
 
 @router.get("/{tracker_id}", response_model=TrackerResponse)
@@ -55,7 +98,7 @@ async def get_tracker(tracker_id: int, db: AsyncSession = Depends(get_db)):
 async def update_tracker(
     tracker_id: int, data: TrackerUpdate, db: AsyncSession = Depends(get_db)
 ):
-    """Update a tracker."""
+    """Update a tracker's configuration including zone rules."""
     result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
     tracker = result.scalar_one_or_none()
     if not tracker:
@@ -92,7 +135,7 @@ async def discover_trackers(db: AsyncSession = Depends(get_db)):
 
 @router.get("/{tracker_id}/stats", response_model=TrackerStatsResponse)
 async def get_tracker_stats(tracker_id: int, db: AsyncSession = Depends(get_db)):
-    """Get detailed stats for a tracker."""
+    """Get detailed stats for a tracker including zone distribution."""
     result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
     tracker = result.scalar_one_or_none()
     if not tracker:
@@ -123,6 +166,11 @@ async def get_tracker_stats(tracker_id: int, db: AsyncSession = Depends(get_db))
         for name, count in sorted(category_counts.items(), key=lambda x: -x[1])[:5]
     ]
 
+    # Zone distribution
+    zone1_count = len([t for t in torrents if t.zone == 1])
+    zone2_count = len([t for t in torrents if t.zone == 2])
+    zone3_count = len([t for t in torrents if t.zone == 3])
+
     return TrackerStatsResponse(
         id=tracker.id,
         name=tracker.name,
@@ -133,12 +181,15 @@ async def get_tracker_stats(tracker_id: int, db: AsyncSession = Depends(get_db))
         average_ratio=average_ratio,
         seed_time_average_hours=seed_time_avg,
         top_categories=top_categories,
+        zone1_count=zone1_count,
+        zone2_count=zone2_count,
+        zone3_count=zone3_count,
     )
 
 
 @router.post("/{tracker_id}/update-stats", response_model=TrackerResponse)
 async def update_tracker_stats(tracker_id: int, db: AsyncSession = Depends(get_db)):
-    """Recalculate and update tracker statistics."""
+    """Recalculate and update tracker statistics including zone counts."""
     result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
     tracker = result.scalar_one_or_none()
     if not tracker:
@@ -155,12 +206,46 @@ async def update_tracker_stats(tracker_id: int, db: AsyncSession = Depends(get_d
         tracker.stats_upload = sum(t.uploaded_bytes for t in torrents)
         tracker.stats_download = sum(t.downloaded_bytes for t in torrents)
         tracker.stats_ratio = sum(t.ratio for t in torrents) / len(torrents)
+        tracker.stats_zone1_count = len([t for t in torrents if t.zone == 1])
+        tracker.stats_zone2_count = len([t for t in torrents if t.zone == 2])
+        tracker.stats_zone3_count = len([t for t in torrents if t.zone == 3])
     else:
         tracker.stats_torrent_count = 0
         tracker.stats_upload = 0
         tracker.stats_download = 0
         tracker.stats_ratio = 0
+        tracker.stats_zone1_count = 0
+        tracker.stats_zone2_count = 0
+        tracker.stats_zone3_count = 0
 
+    await db.commit()
+    await db.refresh(tracker)
+    return tracker
+
+
+@router.post("/{tracker_id}/toggle", response_model=TrackerResponse)
+async def toggle_tracker(tracker_id: int, db: AsyncSession = Depends(get_db)):
+    """Toggle tracker enabled/disabled status."""
+    result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
+    tracker = result.scalar_one_or_none()
+    if not tracker:
+        raise HTTPException(status_code=404, detail="Tracker not found")
+
+    tracker.enabled = not tracker.enabled
+    await db.commit()
+    await db.refresh(tracker)
+    return tracker
+
+
+@router.post("/{tracker_id}/permaseed", response_model=TrackerResponse)
+async def toggle_permaseed(tracker_id: int, db: AsyncSession = Depends(get_db)):
+    """Toggle permaseed status for a tracker."""
+    result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
+    tracker = result.scalar_one_or_none()
+    if not tracker:
+        raise HTTPException(status_code=404, detail="Tracker not found")
+
+    tracker.permaseed = not tracker.permaseed
     await db.commit()
     await db.refresh(tracker)
     return tracker

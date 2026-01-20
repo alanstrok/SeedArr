@@ -6,7 +6,13 @@ from app.database import Base
 
 
 class Torrent(Base):
-    """Model for cached torrent information."""
+    """Model for cached torrent information.
+
+    Zone values:
+    - 1: Obligation zone (never delete - H&R protection)
+    - 2: Preference zone (keep if possible)
+    - 3: Eligible for deletion
+    """
 
     __tablename__ = "torrents"
 
@@ -29,10 +35,17 @@ class Torrent(Base):
     num_leeches: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String(50), default="unknown")  # seeding, downloading, paused, etc.
     save_path: Mapped[str] = mapped_column(String(1000), default="")
-    protected: Mapped[bool] = mapped_column(Boolean, default=False)
-    matched_rule_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("rules.id", ondelete="SET NULL"), nullable=True
-    )
+
+    # Protection and zone status
+    protected: Mapped[bool] = mapped_column(Boolean, default=False)  # Manual protection
+    zone: Mapped[int] = mapped_column(Integer, default=1)  # 1=Obligation, 2=Preference, 3=Eligible
+    zone_reason: Mapped[str] = mapped_column(String(500), default="")  # Explanation for current zone
+    deletion_score: Mapped[float] = mapped_column(Float, default=0.0)  # Higher = delete first
+
+    # Time until obligations are met (for alerts)
+    hours_until_zone2: Mapped[float | None] = mapped_column(Float, nullable=True)  # Hours until Zone 1 -> Zone 2
+    ratio_until_zone2: Mapped[float | None] = mapped_column(Float, nullable=True)  # Ratio needed for Zone 1 -> Zone 2
+
     last_scanned: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -41,7 +54,6 @@ class Torrent(Base):
 
     # Relationships
     tracker = relationship("Tracker", back_populates="torrents", lazy="selectin")
-    matched_rule = relationship("Rule", foreign_keys=[matched_rule_id], lazy="selectin")
 
     def __repr__(self) -> str:
-        return f"<Torrent(hash='{self.hash}', name='{self.name[:30]}...')>"
+        return f"<Torrent(hash='{self.hash}', name='{self.name[:30]}...', zone={self.zone})>"

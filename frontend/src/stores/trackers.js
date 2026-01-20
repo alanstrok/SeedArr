@@ -5,6 +5,7 @@ export const useTrackersStore = defineStore('trackers', {
   state: () => ({
     trackers: [],
     discovered: [],
+    zoneSummary: null,
     loading: false,
     error: null,
   }),
@@ -19,6 +20,17 @@ export const useTrackersStore = defineStore('trackers', {
         this.error = error.message
       } finally {
         this.loading = false
+      }
+    },
+
+    async fetchZoneSummary() {
+      try {
+        const response = await trackersApi.zoneSummary()
+        this.zoneSummary = response.data
+        return response.data
+      } catch (error) {
+        this.error = error.message
+        throw error
       }
     },
 
@@ -42,6 +54,24 @@ export const useTrackersStore = defineStore('trackers', {
       this.trackers = this.trackers.filter(t => t.id !== id)
     },
 
+    async toggle(id) {
+      const response = await trackersApi.toggle(id)
+      const index = this.trackers.findIndex(t => t.id === id)
+      if (index !== -1) {
+        this.trackers[index] = response.data
+      }
+      return response.data
+    },
+
+    async togglePermaseed(id) {
+      const response = await trackersApi.togglePermaseed(id)
+      const index = this.trackers.findIndex(t => t.id === id)
+      if (index !== -1) {
+        this.trackers[index] = response.data
+      }
+      return response.data
+    },
+
     async discover() {
       this.loading = true
       try {
@@ -58,6 +88,15 @@ export const useTrackersStore = defineStore('trackers', {
 
     async getStats(id) {
       const response = await trackersApi.stats(id)
+      return response.data
+    },
+
+    async updateStats(id) {
+      const response = await trackersApi.updateStats(id)
+      const index = this.trackers.findIndex(t => t.id === id)
+      if (index !== -1) {
+        this.trackers[index] = response.data
+      }
       return response.data
     },
   },

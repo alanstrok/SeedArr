@@ -1,6 +1,6 @@
-"""Scheduler service for periodic scans."""
+"""Scheduler service for periodic scans and disk space management."""
 from datetime import datetime
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable
 from loguru import logger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -10,7 +10,8 @@ from sqlalchemy import select
 from app.models import Settings, Torrent, Tracker, Connection
 from app.models.settings import DEFAULT_SETTINGS
 from app.services.qbittorrent import QBittorrentService
-from app.services.rule_engine import RuleEngine
+from app.services.rule_engine import ZoneEngine
+from app.core.security import decrypt_password
 
 
 class SchedulerService:
@@ -21,6 +22,7 @@ class SchedulerService:
         self._scheduler: Optional[AsyncIOScheduler] = None
         self._started = False
         self._last_scan: Optional[datetime] = None
+        self._last_zone_counts: Optional[dict] = None
         self._scan_in_progress = False
         self._start_time: Optional[datetime] = None
         self._db_session_factory: Optional[Callable[[], AsyncSession]] = None
@@ -38,6 +40,11 @@ class SchedulerService:
     def last_scan(self) -> Optional[datetime]:
         """Get last scan time."""
         return self._last_scan
+
+    @property
+    def last_zone_counts(self) -> Optional[dict]:
+        """Get last zone counts."""
+        return self._last_zone_counts
 
     @property
     def uptime_seconds(self) -> float:
@@ -74,7 +81,7 @@ class SchedulerService:
         qbt = QBittorrentService(
             url=connection.url,
             username=connection.username or "",
-            password=connection.password or "",
+            password=decrypt_password(connection.password) if connection.password else "",
         )
 
         if not await qbt.connect():
@@ -162,14 +169,39 @@ class SchedulerService:
                 )
                 logger.info(f"Removed {len(removed_hashes)} orphaned torrents from cache")
 
+            # Update tracker statistics
+            await self._update_tracker_stats(db)
+
             await db.commit()
             return synced
 
         finally:
             await qbt.disconnect()
 
+    async def _update_tracker_stats(self, db: AsyncSession):
+        """Update tracker statistics from cached torrents."""
+        result = await db.execute(select(Tracker))
+        trackers = result.scalars().all()
+
+        for tracker in trackers:
+            result = await db.execute(
+                select(Torrent).where(Torrent.tracker_id == tracker.id)
+            )
+            torrents = result.scalars().all()
+
+            if torrents:
+                tracker.stats_torrent_count = len(torrents)
+                tracker.stats_upload = sum(t.uploaded_bytes for t in torrents)
+                tracker.stats_download = sum(t.downloaded_bytes for t in torrents)
+                tracker.stats_ratio = sum(t.ratio for t in torrents) / len(torrents)
+            else:
+                tracker.stats_torrent_count = 0
+                tracker.stats_upload = 0
+                tracker.stats_download = 0
+                tracker.stats_ratio = 0
+
     async def _run_scheduled_scan(self):
-        """Run scheduled scan task."""
+        """Run scheduled scan task - update zones and cleanup if needed."""
         if self._scan_in_progress:
             logger.warning("Scan already in progress, skipping")
             return
@@ -197,7 +229,7 @@ class SchedulerService:
                 qbt = QBittorrentService(
                     url=connection.url,
                     username=connection.username or "",
-                    password=connection.password or "",
+                    password=decrypt_password(connection.password) if connection.password else "",
                 )
 
                 if not await qbt.connect():
@@ -205,14 +237,31 @@ class SchedulerService:
                     return
 
                 try:
-                    # Run the scan
-                    engine = RuleEngine(db, qbt)
-                    result = await engine.run_scan()
+                    # Run zone evaluation and disk cleanup if needed
+                    engine = ZoneEngine(db, qbt)
+
+                    # Get disk space settings
+                    threshold = await self._get_setting(db, "disk_space_threshold_percent") or 10
+                    target = threshold + 5  # Target 5% above threshold
+
+                    # Run cleanup (will only delete if needed)
+                    result = await engine.cleanup_for_disk_space(
+                        target_free_percent=target,
+                        dry_run=False,
+                        path="/downloads"  # TODO: Make configurable
+                    )
 
                     self._last_scan = datetime.utcnow()
+                    self._last_zone_counts = {
+                        1: result.zone1_count,
+                        2: result.zone2_count,
+                        3: result.zone3_count,
+                    }
+
                     logger.info(
                         f"Scheduled scan completed: "
-                        f"{result.actions_taken} actions taken"
+                        f"Z1={result.zone1_count}, Z2={result.zone2_count}, Z3={result.zone3_count}, "
+                        f"deleted={result.deleted_count}"
                     )
                 finally:
                     await qbt.disconnect()
@@ -261,7 +310,7 @@ class SchedulerService:
         logger.info(f"Scan interval updated to {interval_minutes} minutes")
 
     async def trigger_scan(self, dry_run: bool = False):
-        """Manually trigger a scan."""
+        """Manually trigger a scan/cleanup."""
         if self._scan_in_progress:
             raise RuntimeError("Scan already in progress")
 
@@ -283,21 +332,69 @@ class SchedulerService:
                 qbt = QBittorrentService(
                     url=connection.url,
                     username=connection.username or "",
-                    password=connection.password or "",
+                    password=decrypt_password(connection.password) if connection.password else "",
                 )
 
                 if not await qbt.connect():
                     raise RuntimeError("Failed to connect to qBittorrent")
 
                 try:
-                    engine = RuleEngine(db, qbt)
-                    result = await engine.run_scan(dry_run=dry_run)
+                    engine = ZoneEngine(db, qbt)
+
+                    # Get disk space settings
+                    threshold = await self._get_setting(db, "disk_space_threshold_percent") or 10
+                    target = threshold + 5
+
+                    result = await engine.cleanup_for_disk_space(
+                        target_free_percent=target,
+                        dry_run=dry_run,
+                        path="/downloads"
+                    )
+
                     self._last_scan = datetime.utcnow()
+                    self._last_zone_counts = {
+                        1: result.zone1_count,
+                        2: result.zone2_count,
+                        3: result.zone3_count,
+                    }
+
                     return result
                 finally:
                     await qbt.disconnect()
         finally:
             self._scan_in_progress = False
+
+    async def update_zones_only(self):
+        """Update zone status for all torrents without cleanup."""
+        if not self._db_session_factory:
+            raise RuntimeError("No database session factory configured")
+
+        async with self._db_session_factory() as db:
+            # Sync torrents first
+            synced = await self._sync_torrents(db)
+            logger.info(f"Synced {synced} torrents")
+
+            # Get qBittorrent connection
+            connection = await self._get_qbittorrent_connection(db)
+            if not connection:
+                raise RuntimeError("No qBittorrent connection configured")
+
+            qbt = QBittorrentService(
+                url=connection.url,
+                username=connection.username or "",
+                password=decrypt_password(connection.password) if connection.password else "",
+            )
+
+            if not await qbt.connect():
+                raise RuntimeError("Failed to connect to qBittorrent")
+
+            try:
+                engine = ZoneEngine(db, qbt)
+                zone_counts = await engine.update_all_zones()
+                self._last_zone_counts = zone_counts
+                return zone_counts
+            finally:
+                await qbt.disconnect()
 
 
 # Global scheduler instance
