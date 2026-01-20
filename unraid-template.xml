@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>SeedArr</Name>
+  <Repository>ghcr.io/alanstrok/seedarr:latest</Repository>
+  <Registry>ghcr.io</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/alanstrok/SeedArr/issues</Support>
+  <Project>https://github.com/alanstrok/SeedArr</Project>
+  <Overview>
+    SeedArr - Intelligent Seeding Manager for qBittorrent and the *arr ecosystem.
+
+    Features:
+    - Zone-based seeding management (Obligations, Preferences, Eligible for deletion)
+    - Avoid Hit and Run by respecting tracker requirements
+    - Maximize seeding while managing disk space intelligently
+    - Auto-discover trackers from qBittorrent and Prowlarr
+    - Per-tracker seeding rules configuration
+  </Overview>
+  <Category>Downloaders: MediaApp:Other</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/alanstrok/SeedArr/main/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/alanstrok/SeedArr/main/frontend/public/logo.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI Port" Target="8080" Default="8080" Mode="tcp" Description="Port for the web interface" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Config Path" Target="/app/data" Default="/mnt/user/appdata/seedarr" Mode="rw" Description="Path to store configuration and database" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/seedarr</Config>
+  <Config Name="Downloads Path" Target="/downloads" Default="/mnt/user/downloads" Mode="rw" Description="Path to your downloads folder (for disk space monitoring)" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/downloads</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="Europe/Paris" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Paris</Config>
+</Container>
