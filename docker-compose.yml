@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    container_name: seedarr-backend
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=${TZ:-America/Martinique}
+      - DATABASE_URL=sqlite+aiosqlite:///config/seedarr.db
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+    networks:
+      - seedarr-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8585/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build: ./frontend
+    container_name: seedarr-frontend
+    restart: unless-stopped
+    ports:
+      - "8585:80"
+    depends_on:
+      - backend
+    networks:
+      - seedarr-network
+
+networks:
+  seedarr-network:
+    driver: bridge
